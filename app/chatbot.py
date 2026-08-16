@@ -5,61 +5,103 @@ from groq import Groq
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 
-# =====================================
+
+# ============================================================
+# Configuration
+# ============================================================
+
+VECTOR_DB_PATH = "vector_db"
+EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
+
+# FAISS is returning L2 distance in this index.
+# Lower distance = better retrieval.
+#
+# We will calibrate this value using your actual test results.
+MAX_DISTANCE = 0.75
+
+REFUSAL_MESSAGE = (
+    "The provided 3GPP documentation does not contain sufficient "
+    "information to answer this question."
+)
+
+
+# ============================================================
 # Load Environment Variables
-# =====================================
+# ============================================================
 
 load_dotenv()
 
 api_key = os.getenv("GROQ_API_KEY")
 
 if not api_key:
-    raise ValueError("GROQ_API_KEY not found in .env")
+    raise ValueError(
+        "GROQ_API_KEY not found. Please add it to your .env file."
+    )
 
 client = Groq(api_key=api_key)
 
-# =====================================
+
+# ============================================================
 # Load Embedding Model
-# =====================================
+# ============================================================
 
 print("Loading embedding model...")
 
 embeddings = HuggingFaceEmbeddings(
-    model_name="BAAI/bge-small-en-v1.5",
-    model_kwargs={"device": "cuda"}
+    model_name=EMBEDDING_MODEL,
+    model_kwargs={
+        "device": "cpu"
+    },
+    encode_kwargs={
+        "normalize_embeddings": True
+    },
 )
 
-# =====================================
-# Load FAISS Database
-# =====================================
+
+# ============================================================
+# Load FAISS Vector Database
+# ============================================================
 
 print("Loading FAISS database...")
 
 db = FAISS.load_local(
-    "vector_db",
+    VECTOR_DB_PATH,
     embeddings,
-    allow_dangerous_deserialization=True
+    allow_dangerous_deserialization=True,
 )
 
 print("Ready!")
 
-# =====================================
-# System Prompt
-# =====================================
 
-SYSTEM_PROMPT = """
+# ============================================================
+# System Prompt
+# ============================================================
+
+SYSTEM_PROMPT = f"""
 You are a Telecom 3GPP Standards Assistant.
+
+You answer questions ONLY from the retrieved 3GPP context supplied
+by the application.
 
 STRICT RULES:
 
 1. Use ONLY the provided context.
-2. Never use external knowledge.
-3. Never invent information.
-4. If the answer is not clearly present in the context, reply exactly:
+2. Never use outside knowledge.
+3. Never use your own background knowledge.
+4. Never invent facts.
+5. Never infer information that is not clearly supported by the context.
+6. If the context does not clearly contain the answer, reply exactly:
 
-The provided 3GPP documentation does not contain sufficient information to answer this question.
+{REFUSAL_MESSAGE}
 
-5. For definition questions answer in this format:
+7. Every factual statement must be supported by the retrieved context.
+8. Do not invent document names, section numbers, page numbers,
+   specifications, procedures, or terminology.
+9. Do not include citations or page numbers yourself.
+   The application will add verified source information separately.
+10. Keep the answer concise and technical.
+
+For definition-style questions use:
 
 Definition:
 <definition>
@@ -69,39 +111,154 @@ Key Functions:
 - item 2
 - item 3
 
-6. Only include functions that appear in the context.
-7. Do not mention source names or page numbers.
-8. Keep answers concise and technical.
+Only include functions that are clearly supported by the supplied context.
 """
 
-# =====================================
+
+# ============================================================
+# Helper Functions
+# ============================================================
+
+def print_sources(docs):
+    """
+    Print verified source information from retrieved document metadata.
+    The LLM does not generate these citations.
+    """
+
+    print("\nSources:")
+
+    for i, doc in enumerate(docs, start=1):
+        source = doc.metadata.get("source", "Unknown")
+        page = doc.metadata.get("page", "Unknown")
+
+        print(f"[{i}] {source} | Page {page}")
+
+
+def build_context(filtered_docs):
+    """
+    Build context from the retrieved documents.
+    Source and page metadata are included so the LLM understands
+    where the supplied text came from.
+    """
+
+    context_parts = []
+
+    for doc, score in filtered_docs:
+
+        source = doc.metadata.get("source", "Unknown")
+        page = doc.metadata.get("page", "Unknown")
+
+        context_parts.append(
+            f"""
+SOURCE: {source}
+PAGE: {page}
+
+CONTENT:
+{doc.page_content}
+
+====================
+"""
+        )
+
+    return "\n".join(context_parts)
+
+
+# ============================================================
 # Chat Loop
-# =====================================
+# ============================================================
 
 while True:
 
-    question = input("\nAsk Question (type exit to quit): ")
+    question = input("\nAsk Question (type exit to quit): ").strip()
 
-    if question.lower() == "exit":
+    # --------------------------------------------------------
+    # Exit Handling
+    # --------------------------------------------------------
+
+    if question.lower() in {"exit", "quit", "q"}:
+        print("Goodbye!")
         break
+
+    if not question:
+        print("Please enter a question.")
+        continue
 
     try:
 
-        print("Searching documents...")
+        # ----------------------------------------------------
+        # Retrieve Documents + Scores
+        # ----------------------------------------------------
 
-        docs = db.similarity_search(
+        print("\nSearching documents...")
+
+        results = db.similarity_search_with_score(
             question,
             k=8
         )
 
-        # ---------------------------------
-        # Remove duplicate pages
-        # ---------------------------------
+        if not results:
+
+            print("\n" + "=" * 80)
+            print("ANSWER")
+            print("=" * 80)
+            print(REFUSAL_MESSAGE)
+
+            continue
+
+        # ----------------------------------------------------
+        # Display Retrieval Results
+        # ----------------------------------------------------
+
+        print("\nRetrieval Results:")
+
+        for doc, score in results:
+
+            source = doc.metadata.get("source", "Unknown")
+            page = doc.metadata.get("page", "Unknown")
+
+            print(
+                f"{source} | "
+                f"Page {page} | "
+                f"Distance: {score:.4f}"
+            )
+
+        # ----------------------------------------------------
+        # Evidence Check
+        # ----------------------------------------------------
+
+        best_score = min(score for _, score in results)
+
+        print(f"\nBest retrieval distance: {best_score:.4f}")
+        print(f"Maximum allowed distance: {MAX_DISTANCE:.4f}")
+
+        # Higher distance means weaker evidence.
+        # If the best result is still too far away,
+        # do NOT call the LLM.
+
+        if best_score > MAX_DISTANCE:
+
+            print("\n" + "=" * 80)
+            print("ANSWER")
+            print("=" * 80)
+
+            print(REFUSAL_MESSAGE)
+
+            print(
+                "\nGroq was NOT called because retrieval "
+                "evidence was insufficient."
+            )
+
+            continue
+
+        # ----------------------------------------------------
+        # Remove Duplicate Pages
+        # ----------------------------------------------------
 
         filtered_docs = []
+
         seen = set()
 
-        for doc in docs:
+        for doc, score in results:
 
             source = doc.metadata.get("source")
             page = doc.metadata.get("page")
@@ -109,44 +266,63 @@ while True:
             key = (source, page)
 
             if key not in seen:
+
                 seen.add(key)
-                filtered_docs.append(doc)
 
-        docs = filtered_docs
+                filtered_docs.append(
+                    (doc, score)
+                )
 
-        if not docs:
-            print("No documents found.")
+        if not filtered_docs:
+
+            print("\n" + "=" * 80)
+            print("ANSWER")
+            print("=" * 80)
+
+            print(REFUSAL_MESSAGE)
+
             continue
 
-        print("\nRetrieved Documents:")
+        # ----------------------------------------------------
+        # Print Selected Documents
+        # ----------------------------------------------------
 
-        for doc in docs:
+        print("\nSelected Documents:")
+
+        for doc, score in filtered_docs:
+
+            source = doc.metadata.get("source", "Unknown")
+            page = doc.metadata.get("page", "Unknown")
+
             print(
-                f"{doc.metadata.get('source')} | Page {doc.metadata.get('page')}"
+                f"{source} | "
+                f"Page {page} | "
+                f"Distance: {score:.4f}"
             )
 
-        # ---------------------------------
+        # ----------------------------------------------------
         # Build Context
-        # ---------------------------------
+        # ----------------------------------------------------
 
-        context = ""
-
-        for doc in docs:
-
-            context += f"""
-{doc.page_content}
-
-====================
-"""
+        context = build_context(
+            filtered_docs
+        )
 
         # Limit context size
         context = context[:12000]
 
+        # ----------------------------------------------------
+        # Call Groq
+        # ----------------------------------------------------
+
         print("\nCalling Groq...")
 
         response = client.chat.completions.create(
+
             model="llama-3.3-70b-versatile",
+
             temperature=0,
+
             messages=[
                 {
                     "role": "system",
@@ -158,7 +334,7 @@ while True:
 Question:
 {question}
 
-Context:
+Retrieved 3GPP Context:
 {context}
 """
                 }
@@ -167,16 +343,34 @@ Context:
 
         answer = response.choices[0].message.content
 
+        # ----------------------------------------------------
+        # Empty Response Protection
+        # ----------------------------------------------------
+
         if not answer or not answer.strip():
-            answer = (
-                "The provided 3GPP documentation does not contain "
-                "sufficient information to answer this question."
-            )
+
+            answer = REFUSAL_MESSAGE
+
+        # ----------------------------------------------------
+        # Final Answer
+        # ----------------------------------------------------
 
         print("\n" + "=" * 80)
         print("ANSWER")
         print("=" * 80)
+
         print(answer)
+
+        # ----------------------------------------------------
+        # Verified Sources
+        # ----------------------------------------------------
+
+        print_sources(
+            [
+                doc
+                for doc, score in filtered_docs
+            ]
+        )
 
     except Exception as e:
 

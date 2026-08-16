@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>3GPP Standards Assistant</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='css/style.css') }}"
+    >
+
+</head>
+
+<body>
+
+    <div class="app">
+
+        <!-- Header -->
+        <header class="header">
+
+            <div class="brand">
+
+                <div class="logo">
+                    3GPP
+                </div>
+
+                <div>
+                    <h1>3GPP Standards Assistant</h1>
+
+                    <p>
+                        Telecom RAG Knowledge Assistant
+                    </p>
+                </div>
+
+            </div>
+
+            <div class="status">
+                <span class="status-dot"></span>
+                Online
+            </div>
+
+        </header>
+
+
+        <!-- Main -->
+        <main class="main">
+
+            <section class="hero">
+
+                <h2>
+                    Ask about Telecom 3GPP Standards
+                </h2>
+
+                <p>
+                    Get answers grounded in the provided
+                    3GPP standards documentation.
+                </p>
+
+            </section>
+
+
+            <!-- Chat -->
+            <section
+                id="chat"
+                class="chat"
+            >
+
+                <div
+                    id="welcome"
+                    class="welcome"
+                >
+
+                    <div class="welcome-icon">
+                        5G
+                    </div>
+
+                    <h3>
+                        3GPP RAG Assistant
+                    </h3>
+
+                    <p>
+                        Ask questions about 5G architecture,
+                        AMF, SMF, UPF, NAS signalling and
+                        related standards.
+                    </p>
+
+                </div>
+
+            </section>
+
+
+            <!-- Input -->
+            <form
+                id="question-form"
+                class="input-area"
+            >
+
+                <textarea
+                    id="question"
+                    rows="1"
+                    placeholder="Ask a question about the 3GPP standards..."
+                    autocomplete="off"
+                ></textarea>
+
+                <button
+                    id="send-button"
+                    type="submit"
+                >
+                    <span>Ask</span>
+                    <span class="send-icon">➤</span>
+                </button>
+
+            </form>
+
+
+            <div class="disclaimer">
+
+                Answers are generated only from retrieved
+                3GPP documentation. Unsupported questions
+                are rejected.
+
+            </div>
+
+        </main>
+
+    </div>
+
+
+    <script
+        src="{{ url_for('static', filename='js/app.js') }}"
+    ></script>
+
+</body>
+</html>
