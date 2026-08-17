@@ -22,7 +22,7 @@ IMAGE_DIR = PROJECT_ROOT / "static" / "generated"
 
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 
-# Lower FAISS L2 distance = better retrieval
+# Lower FAISS distance = better retrieval
 MAX_DISTANCE = 0.75
 
 REFUSAL_MESSAGE = (
@@ -30,7 +30,6 @@ REFUSAL_MESSAGE = (
     "information to answer this question."
 )
 
-# Create generated image directory
 IMAGE_DIR.mkdir(
     parents=True,
     exist_ok=True
@@ -94,23 +93,46 @@ print("RAG service ready!")
 SYSTEM_PROMPT = f"""
 You are a Telecom 3GPP Standards Assistant.
 
+Your answers must be grounded ONLY in the retrieved
+3GPP standards context provided by the application.
+
 STRICT RULES:
 
-1. Use ONLY the retrieved 3GPP context supplied by the application.
+1. Use ONLY the retrieved 3GPP context.
+
 2. Never use external knowledge.
-3. Never invent information.
-4. Never infer facts that are not clearly supported by the context.
-5. If the context does not clearly support the answer, reply exactly:
+
+3. Never use your pretrained knowledge to fill missing information.
+
+4. Never invent facts.
+
+5. Never infer information that is not clearly supported
+   by the retrieved context.
+
+6. Every factual statement must be directly supported
+   by the retrieved context.
+
+7. If the retrieved context does not clearly contain
+   the answer, reply exactly:
 
 {REFUSAL_MESSAGE}
 
-6. Every factual statement must be supported by the retrieved context.
-7. Never invent a 3GPP document, section, figure, or page number.
-8. Do not claim that a diagram exists unless the supplied context supports it.
-9. Keep answers concise and technical.
-10. Do not answer questions using knowledge that is absent from the context.
+8. Do not invent:
+   - document names
+   - section numbers
+   - page numbers
+   - figure numbers
+   - network functions
+   - procedures
+   - interfaces
+   - technical details
 
-For definition questions use:
+9. If the user asks something unrelated to Telecom
+   3GPP standards, use the refusal message.
+
+10. Keep answers concise and technical.
+
+11. For definition questions use:
 
 Definition:
 <definition>
@@ -120,7 +142,15 @@ Key Functions:
 - item 2
 - item 3
 
-Only include information explicitly supported by the retrieved context.
+12. Only include functions explicitly supported
+    by the retrieved context.
+
+13. Do not answer a question simply because the topic
+    appears in the retrieved context. The actual answer
+    must be supported by the context.
+
+14. If evidence is ambiguous or incomplete, refuse
+    rather than guessing.
 """
 
 
@@ -130,8 +160,8 @@ Only include information explicitly supported by the retrieved context.
 
 def is_visual_query(question: str) -> bool:
     """
-    Determines whether the user wants a diagram,
-    architecture, image, topology, or visual representation.
+    Detect whether the user is requesting a diagram,
+    architecture, image, topology, flow or figure.
     """
 
     q = question.lower().strip()
@@ -151,6 +181,7 @@ def is_visual_query(question: str) -> bool:
         "flow diagram",
         "call flow",
         "signaling flow",
+        "signalling flow",
         "procedure flow",
         "figure",
         "image",
@@ -172,18 +203,6 @@ def is_visual_query(question: str) -> bool:
 def is_general_5g_core_architecture_query(
     question: str
 ) -> bool:
-    """
-    Detects a request for the general 5G Core / 5G System
-    architecture.
-
-    Specialized requests such as:
-    - non-3GPP architecture
-    - trusted architecture
-    - untrusted architecture
-    - roaming architecture
-
-    are intentionally excluded.
-    """
 
     q = question.lower()
 
@@ -226,20 +245,14 @@ def is_general_5g_core_architecture_query(
 # ============================================================
 
 def get_visual_keywords(question: str):
-    """
-    Returns keywords used when selecting a PDF page
-    for a visual answer.
-    """
 
     q = question.lower()
 
     # --------------------------------------------------------
-    # General 5G Core architecture
+    # General 5G architecture
     # --------------------------------------------------------
 
-    if is_general_5g_core_architecture_query(
-        question
-    ):
+    if is_general_5g_core_architecture_query(question):
 
         return [
             "4.2.3",
@@ -377,9 +390,7 @@ def get_visual_keywords(question: str):
 # PDF PAGE TEXT
 # ============================================================
 
-def get_page_text(
-    page
-) -> str:
+def get_page_text(page) -> str:
 
     try:
         return page.get_text(
@@ -399,15 +410,8 @@ def score_visual_page(
     keywords,
     general_architecture=False
 ):
-    """
-    Score one PDF page.
 
-    Higher score = better visual candidate.
-    """
-
-    text = get_page_text(
-        page
-    )
+    text = get_page_text(page)
 
     score = 0
 
@@ -471,7 +475,6 @@ def score_visual_page(
 
         image_count = 0
 
-    # Architecture diagrams often have vector drawings
     score += min(
         drawing_count,
         30
@@ -488,25 +491,18 @@ def score_visual_page(
 
     if general_architecture:
 
-        # Strong preference for official general
-        # 5G architecture section.
         if "4.2.3" in text:
-
             score += 100
 
         if "non-roaming reference architecture" in text:
-
             score += 100
 
         if "figure 4.2.3-1" in text:
-
             score += 120
 
         if "non-roaming 5g system architecture" in text:
-
             score += 100
 
-        # Prefer pages containing core NFs
         nf_terms = [
             "amf",
             "smf",
@@ -526,32 +522,23 @@ def score_visual_page(
 
         score += nf_count * 8
 
-        # ----------------------------------------------
-        # Strong penalties for specialized architecture
-        # ----------------------------------------------
-
+        # Avoid specialized architecture pages
         if "non-3gpp" in text:
-
             score -= 100
 
         if "trusted non-3gpp" in text:
-
             score -= 100
 
         if "untrusted non-3gpp" in text:
-
             score -= 100
 
         if "n3iwf" in text:
-
             score -= 60
 
         if "tngf" in text:
-
             score -= 60
 
         if "roaming architecture" in text:
-
             score -= 50
 
     return score
@@ -566,11 +553,6 @@ def render_pdf_page(
     page_index,
     output_suffix="page"
 ):
-    """
-    Render one PDF page to PNG.
-
-    page_index is zero-based for PyMuPDF.
-    """
 
     if not source_name:
         return None
@@ -620,7 +602,7 @@ def render_pdf_page(
             page_index
         ]
 
-        # Good quality for web display
+        # Web-friendly rendering
         matrix = fitz.Matrix(
             1.5,
             1.5
@@ -677,12 +659,6 @@ def find_best_visual_page(
     preferred_source=None,
     preferred_page=None
 ):
-    """
-    Find the most relevant diagram page.
-
-    General 5G Core architecture gets special treatment:
-    TS 23.501 -> Section 4.2.3 -> Figure 4.2.3-1.
-    """
 
     general_architecture = (
         is_general_5g_core_architecture_query(
@@ -697,8 +673,7 @@ def find_best_visual_page(
     candidate_files = []
 
     # --------------------------------------------------------
-    # For the general 5G Core architecture,
-    # always prioritize TS 23.501.
+    # General 5G architecture
     # --------------------------------------------------------
 
     if general_architecture:
@@ -899,10 +874,6 @@ def ask_question(
             "groq_called": False,
         }
 
-    # --------------------------------------------------------
-    # FAISS retrieval
-    # --------------------------------------------------------
-
     print(
         f"\nQuestion: {question}"
     )
@@ -910,6 +881,10 @@ def ask_question(
     print(
         "Searching 3GPP documents..."
     )
+
+    # --------------------------------------------------------
+    # FAISS retrieval
+    # --------------------------------------------------------
 
     results = db.similarity_search_with_score(
         question,
@@ -1034,7 +1009,7 @@ def ask_question(
         filtered_docs
     )
 
-    # Keep context manageable
+    # Prevent excessively large prompts
     context = context[:12000]
 
     # --------------------------------------------------------
@@ -1048,11 +1023,8 @@ def ask_question(
     try:
 
         response = client.chat.completions.create(
-
             model="llama-3.3-70b-versatile",
-
             temperature=0,
-
             messages=[
                 {
                     "role": "system",
@@ -1223,11 +1195,11 @@ Retrieved 3GPP Context:
 
             if image_url:
 
-                # --------------------------------------------
-                # Find matching source
-                # --------------------------------------------
-
                 matched = False
+
+                # ------------------------------------------------
+                # Attach image to matching source
+                # ------------------------------------------------
 
                 for source_item in sources:
 
@@ -1254,9 +1226,9 @@ Retrieved 3GPP Context:
 
                         break
 
-                # --------------------------------------------
-                # Add visual page as an additional source
-                # --------------------------------------------
+                # ------------------------------------------------
+                # Add visual page as source if necessary
+                # ------------------------------------------------
 
                 if not matched:
 

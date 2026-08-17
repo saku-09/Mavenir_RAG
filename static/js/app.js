@@ -5,16 +5,23 @@ const chat = document.getElementById("chat");
 const welcome = document.getElementById("welcome");
 
 
-/* ============================================================
-   Helpers
-============================================================ */
+// ============================================================
+// Helpers
+// ============================================================
 
 function escapeHtml(text) {
+
     const div = document.createElement("div");
+
     div.textContent = text ?? "";
+
     return div.innerHTML;
 }
 
+
+// ============================================================
+// Format 3GPP Document Name
+// ============================================================
 
 function formatDocumentName(filename) {
 
@@ -26,23 +33,40 @@ function formatDocumentName(filename) {
         .replace(/\.pdf$/i, "")
         .replace(/^ts_/i, "TS ");
 
-    // Convert common filename format:
-    // 123501v171500p -> 23.501 Release 17
+    /*
+        Example:
+
+        ts_123501v171500p.pdf
+
+        becomes:
+
+        3GPP TS 23.501 • Release 17
+    */
+
     const match = name.match(
         /123(\d{3})v(\d{2})(\d{2})(\d{2})p/i
     );
 
     if (match) {
-        const specification = `23.${match[1]}`;
-        const release = match[2];
 
-        return `3GPP TS ${specification} • Release ${release}`;
+        const specification =
+            `23.${match[1]}`;
+
+        const release =
+            match[2];
+
+        return (
+            `3GPP TS ${specification} • Release ${release}`
+        );
     }
 
-    // Generic formatting fallback
     return name.toUpperCase();
 }
 
+
+// ============================================================
+// Create Source Card
+// ============================================================
 
 function createSourceCard(source) {
 
@@ -53,9 +77,9 @@ function createSourceCard(source) {
         "source-card";
 
 
-    /* --------------------------------------------------------
-       Source document name
-    -------------------------------------------------------- */
+    // --------------------------------------------------------
+    // Document name
+    // --------------------------------------------------------
 
     const sourceName =
         document.createElement("div");
@@ -68,10 +92,14 @@ function createSourceCard(source) {
             source.document
         );
 
+    sourceCard.appendChild(
+        sourceName
+    );
 
-    /* --------------------------------------------------------
-       Source metadata
-    -------------------------------------------------------- */
+
+    // --------------------------------------------------------
+    // Page information
+    // --------------------------------------------------------
 
     const sourceMeta =
         document.createElement("div");
@@ -79,22 +107,28 @@ function createSourceCard(source) {
     sourceMeta.className =
         "source-meta";
 
-    sourceMeta.textContent =
-        `Page ${source.page} • Retrieval distance ${source.distance}`;
+    if (
+        source.page !== undefined &&
+        source.page !== null
+    ) {
 
+        sourceMeta.textContent =
+            `Page ${source.page}`;
 
-    sourceCard.appendChild(
-        sourceName
-    );
+    } else {
+
+        sourceMeta.textContent =
+            "3GPP standards document";
+    }
 
     sourceCard.appendChild(
         sourceMeta
     );
 
 
-    /* --------------------------------------------------------
-       Retrieved PDF page image
-    -------------------------------------------------------- */
+    // --------------------------------------------------------
+    // Retrieved PDF / Architecture image
+    // --------------------------------------------------------
 
     if (source.image_url) {
 
@@ -115,21 +149,24 @@ function createSourceCard(source) {
             source.image_url;
 
         image.alt =
-            `${formatDocumentName(source.document)} - Page ${source.page}`;
+            `${formatDocumentName(
+                source.document
+            )} - Page ${source.page}`;
 
         image.loading =
             "lazy";
 
 
-        /* ----------------------------------------------------
-           Image error handling
-        ---------------------------------------------------- */
+        // ----------------------------------------------------
+        // Image error handling
+        // ----------------------------------------------------
 
-        image.onerror = function () {
+        image.onerror =
+            function () {
 
-            imageWrapper.remove();
+                imageWrapper.remove();
 
-        };
+            };
 
 
         imageWrapper.appendChild(
@@ -146,6 +183,10 @@ function createSourceCard(source) {
 }
 
 
+// ============================================================
+// Add Chat Message
+// ============================================================
+
 function addMessage(
     role,
     text,
@@ -155,6 +196,7 @@ function addMessage(
     if (welcome) {
         welcome.remove();
     }
+
 
     const wrapper =
         document.createElement("div");
@@ -170,9 +212,9 @@ function addMessage(
         "message-card";
 
 
-    /* --------------------------------------------------------
-       Message label
-    -------------------------------------------------------- */
+    // --------------------------------------------------------
+    // Message label
+    // --------------------------------------------------------
 
     const label =
         document.createElement("div");
@@ -185,10 +227,14 @@ function addMessage(
             ? "You"
             : "3GPP Assistant";
 
+    card.appendChild(
+        label
+    );
 
-    /* --------------------------------------------------------
-       Message text
-    -------------------------------------------------------- */
+
+    // --------------------------------------------------------
+    // Message text
+    // --------------------------------------------------------
 
     const messageText =
         document.createElement("div");
@@ -199,19 +245,14 @@ function addMessage(
     messageText.innerHTML =
         escapeHtml(text);
 
-
-    card.appendChild(
-        label
-    );
-
     card.appendChild(
         messageText
     );
 
 
-    /* ========================================================
-       Assistant metadata
-    ======================================================== */
+    // ========================================================
+    // Assistant Metadata
+    // ========================================================
 
     if (
         role === "assistant" &&
@@ -219,9 +260,9 @@ function addMessage(
     ) {
 
 
-        /* ----------------------------------------------------
-           Verified sources
-        ---------------------------------------------------- */
+        // ----------------------------------------------------
+        // Verified Sources
+        // ----------------------------------------------------
 
         if (
             metadata.sources &&
@@ -242,8 +283,7 @@ function addMessage(
                 "sources-title";
 
             title.textContent =
-                "Verified sources";
-
+                "Verified 3GPP Sources";
 
             sources.appendChild(
                 title
@@ -271,9 +311,9 @@ function addMessage(
         }
 
 
-        /* ----------------------------------------------------
-           Confidence + grounding
-        ---------------------------------------------------- */
+        // ----------------------------------------------------
+        // Confidence + Grounding
+        // ----------------------------------------------------
 
         const metadataBar =
             document.createElement("div");
@@ -282,96 +322,54 @@ function addMessage(
             "metadata";
 
 
+        // ----------------------------------------------------
+        // Confidence
+        // ----------------------------------------------------
+
         const confidence =
             document.createElement("span");
 
+        const confidenceValue =
+            metadata.confidence || "low";
+
         confidence.className =
-            `badge ${metadata.confidence || "low"}`;
+            `badge ${confidenceValue}`;
 
         confidence.textContent =
-            `Confidence: ${
-                metadata.confidence || "low"
-            }`;
-
+            `Confidence: ${confidenceValue}`;
 
         metadataBar.appendChild(
             confidence
         );
 
 
+        // ----------------------------------------------------
+        // Grounding
+        // ----------------------------------------------------
+
         const grounded =
             document.createElement("span");
 
-        grounded.className =
-            "badge grounded";
-
-
         if (metadata.grounded) {
 
+            grounded.className =
+                "badge grounded";
+
             grounded.textContent =
-                "Grounded";
+                "Grounded in 3GPP";
 
         } else {
 
-            grounded.textContent =
-                "Not grounded";
-        }
+            grounded.className =
+                "badge";
 
+            grounded.textContent =
+                "Insufficient evidence";
+        }
 
         metadataBar.appendChild(
             grounded
         );
-
-
-        /* ----------------------------------------------------
-           Retrieval distance
-        ---------------------------------------------------- */
-
-        if (
-            metadata.retrieval_distance !== null &&
-            metadata.retrieval_distance !== undefined
-        ) {
-
-            const distance =
-                document.createElement("span");
-
-            distance.className =
-                "badge grounded";
-
-            distance.textContent =
-                `Evidence distance: ${metadata.retrieval_distance}`;
-
-
-            metadataBar.appendChild(
-                distance
-            );
-        }
-
-
-        /* ----------------------------------------------------
-           Groq invocation status
-        ---------------------------------------------------- */
-
-        if (
-            metadata.groq_called !== undefined
-        ) {
-
-            const groqStatus =
-                document.createElement("span");
-
-            groqStatus.className =
-                "badge grounded";
-
-            groqStatus.textContent =
-                metadata.groq_called
-                    ? "LLM invoked"
-                    : "LLM not invoked";
-
-
-            metadataBar.appendChild(
-                groqStatus
-            );
-        }
 
 
         card.appendChild(
@@ -379,6 +377,10 @@ function addMessage(
         );
     }
 
+
+    // --------------------------------------------------------
+    // Add message to chat
+    // --------------------------------------------------------
 
     wrapper.appendChild(
         card
@@ -389,18 +391,18 @@ function addMessage(
     );
 
 
-    /* --------------------------------------------------------
-       Scroll
-    -------------------------------------------------------- */
+    // --------------------------------------------------------
+    // Scroll to latest message
+    // --------------------------------------------------------
 
     chat.scrollTop =
         chat.scrollHeight;
 }
 
 
-/* ============================================================
-   Loading indicator
-============================================================ */
+// ============================================================
+// Loading Indicator
+// ============================================================
 
 function addLoading() {
 
@@ -439,7 +441,7 @@ function addLoading() {
         document.createElement("span");
 
     text.textContent =
-        "Searching 3GPP documents and generating answer...";
+        "Searching 3GPP standards...";
 
 
     loading.appendChild(
@@ -471,6 +473,10 @@ function addLoading() {
 }
 
 
+// ============================================================
+// Remove Loading Indicator
+// ============================================================
+
 function removeLoading() {
 
     const loading =
@@ -484,9 +490,9 @@ function removeLoading() {
 }
 
 
-/* ============================================================
-   Submit Question
-============================================================ */
+// ============================================================
+// Submit Question
+// ============================================================
 
 form.addEventListener(
     "submit",
@@ -504,9 +510,9 @@ form.addEventListener(
         }
 
 
-        /* ----------------------------------------------------
-           Show user question
-        ---------------------------------------------------- */
+        // ----------------------------------------------------
+        // Show user question
+        // ----------------------------------------------------
 
         addMessage(
             "user",
@@ -528,6 +534,10 @@ form.addEventListener(
 
 
         try {
+
+            // ------------------------------------------------
+            // Send question to Flask
+            // ------------------------------------------------
 
             const response =
                 await fetch(
@@ -554,9 +564,9 @@ form.addEventListener(
             removeLoading();
 
 
-            /* ------------------------------------------------
-               API error
-            ------------------------------------------------ */
+            // ------------------------------------------------
+            // API error
+            // ------------------------------------------------
 
             if (
                 !response.ok ||
@@ -573,9 +583,9 @@ form.addEventListener(
             }
 
 
-            /* ------------------------------------------------
-               Assistant response
-            ------------------------------------------------ */
+            // ------------------------------------------------
+            // Assistant response
+            // ------------------------------------------------
 
             addMessage(
                 "assistant",
@@ -588,13 +598,7 @@ form.addEventListener(
                         data.confidence || "low",
 
                     grounded:
-                        data.grounded === true,
-
-                    retrieval_distance:
-                        data.retrieval_distance ?? null,
-
-                    groq_called:
-                        data.groq_called
+                        data.grounded === true
                 }
             );
 
@@ -627,9 +631,9 @@ form.addEventListener(
 );
 
 
-/* ============================================================
-   Auto-grow textarea
-============================================================ */
+// ============================================================
+// Auto Grow Textarea
+// ============================================================
 
 questionInput.addEventListener(
     "input",
@@ -647,9 +651,9 @@ questionInput.addEventListener(
 );
 
 
-/* ============================================================
-   Enter / Shift + Enter
-============================================================ */
+// ============================================================
+// Enter / Shift + Enter
+// ============================================================
 
 questionInput.addEventListener(
     "keydown",
@@ -665,4 +669,4 @@ questionInput.addEventListener(
             form.requestSubmit();
         }
     }
-); q
+);
